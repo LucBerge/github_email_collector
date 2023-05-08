@@ -25,31 +25,35 @@ class GithubUser():
             else:
                 # Get repos
                 repo_tries = self.DEFAULT_REPO_TRIES
-                for repo in self._user.get_repos():
-                    # Get commits
-                    commit_tries = self.DEFAULT_COMMIT_TRIES
-                    for commit in repo.get_commits(author=self._user):
-                        # Get patch
-                        patch = requests.get(commit.html_url + ".patch").text
-                        emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
+                for repo in self._user.get_repos(type="owner"):
 
-                        # If found a email
-                        if len(emails):
-                            self._email = emails[0]
-                            return self._email
+                    # If the repo is not a fork
+                    if not repo.fork:
 
-                        # If was last try, skip to next repo
-                        commit_tries -= 1
-                        if commit_tries == 0:
+                        # Get commits
+                        commit_tries = self.DEFAULT_COMMIT_TRIES
+                        for commit in repo.get_commits(author=self._user):
+                            # Get patch
+                            patch = requests.get(commit.html_url + ".patch").text
+                            emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
+
+                            # If found a email
+                            if len(emails):
+                                self._email = emails[0]
+                                return self._email
+
+                            # If was last try, skip to next repo
+                            commit_tries -= 1
+                            if commit_tries == 0:
+                                break
+
+                        # If was last try, skip to next user
+                        repo_tries -= 1
+                        if repo_tries == 0:
                             break
 
-                    # If was last try, skip to next user
-                    repo_tries -= 1
-                    if repo_tries == 0:
-                        break
-
         except github.GithubException:
-            print("Could not retrieve user infos, skipping it", flush=True)
+            pass
 
         return self._email
 
@@ -57,16 +61,13 @@ class EmailCollector:
 
     SLEEP_TIME = 0.01
     OVER_RATE_LIMIT_SLEEP_TIME = 60*60
+    MAX_RESULTS_PER_PAGE = 40000
     RATE_LIMIT = 4900
 
     def __init__(self, token: str, repo: str):
-        g = github.Github(token)
+        g = github.Github(token, per_page=self.MAX_RESULTS_PER_PAGE)
         self._repo = g.get_repo(repo)
         self._requests = 0
-
-        self.reset()
-
-    def reset(self):
         self._users = {}
 
     def __add_user(self, user: NamedUser)->None:
@@ -77,11 +78,7 @@ class EmailCollector:
 
         # For each contributor
         for i in range(elements.totalCount):
-        
-            if self._requests % self.RATE_LIMIT == 0 and self._requests != 0:
-                print(f"Rate limit reached, waiting {self.OVER_RATE_LIMIT_SLEEP_TIME} seconds", flush=True, end='\n' if i+1==elements.totalCount else '\r')
-                time.sleep(self.OVER_RATE_LIMIT_SLEEP_TIME)
-        
+
             print(f"{i+1}/{elements.totalCount}", flush=True, end='\n' if i+1==elements.totalCount else '\r')
             # Add the user
             self.__add_user(mapper(elements[i]))
@@ -115,37 +112,38 @@ class EmailCollector:
         return self.__add_elements(self._repo.get_issues(), lambda i: i.user)
 
     def get_users(self)->dict:
-        # Reset users
-        self.reset()
+        print(f"Getting users for {self._repo.full_name}...")
 
-        self.__add_owner()
-        self.__add_contributors()
-        self.__add_forks()
-        self.__add_stargazers()
-        self.__add_watchers()
-        self.__add_issues()
+        # If users not collected
+        if len(self._users) == 0:
+            self.__add_owner()
+            self.__add_contributors()
+            self.__add_forks()
+            self.__add_stargazers()
+            self.__add_watchers()
+            self.__add_issues()
 
         print(f"Found {len(self._users)} unique users")
-
         return self._users
 
-    def get_emails(self)->dict:
-        emails = {}
-
+    def get_emails(self)->tuple[dict, float]:
         self.get_users()
 
-        print("Getting email addresses...")
+        print(f"Getting email addresses for {self._repo.full_name}...")
+        emails = {}
+
         i = 1
         print(f"0/{len(self._users)}", flush=True, end='\r')
         for login, user in self._users.items():
-            print(f"{i}/{len(self._users)}", flush=True, end='\n' if i==len(self._users) else '\r')
-            i+=1
 
             email = user.get_email()
             if email is not None:
                 emails[login] = email
 
-        print(f"Found {len(emails)} email addresses")
-        print(f"Success rate is {round(len(emails)*100/len(self._users), 2)}%")
+            print(f"{i}/{len(self._users)} | {len(emails)} success | {i-len(emails)} fails", flush=True, end='\n' if i==len(self._users) else '\r')
+            i+=1
 
-        return emails
+        print(f"Found {len(emails)} email addresses")
+        success_rate = round(len(emails)*100/len(self._users), 2)
+        print(f"Success rate is {success_rate}%")
+        return emails, success_rate
