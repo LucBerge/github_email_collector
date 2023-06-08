@@ -1,6 +1,5 @@
-import github
-from github import NamedUser
-import time
+from github import NamedUser, Github, GithubException
+from datetime import datetime
 import requests
 import re
 
@@ -9,53 +8,44 @@ REPOS = "bot4dofus/Datafus"
 
 class GithubUser():
 
-    DEFAULT_REPO_TRIES = 2
-    DEFAULT_COMMIT_TRIES = 2
+    DEFAULT_COMMITS_LIMIT = 4
 
     REGEX_PATCH_EMAIL = r'From: .*<(.+?)>'
 
-    def __init__(self, user):
+    def __init__(self, client: Github, user: NamedUser):
+        self._client = client
         self._user = user
         self._email = None
 
     def get_email(self)->str:
         try:
+            # If user has public email address
             if self._user.email is not None:
                 self._email = self._user.email
             else:
-                # Get repos
-                repo_tries = self.DEFAULT_REPO_TRIES
-                for repo in self._user.get_repos(type="owner"):
-
-                    # If the repo is not a fork
-                    if not repo.fork:
-
-                        # Get commits
-                        commit_tries = self.DEFAULT_COMMIT_TRIES
-                        for commit in repo.get_commits(author=self._user):
-                            # Get patch
-                            patch = requests.get(commit.html_url + ".patch").text
-                            emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
-
-                            # If found a email
-                            if len(emails):
-                                self._email = emails[0]
-                                return self._email
-
-                            # If was last try, skip to next repo
-                            commit_tries -= 1
-                            if commit_tries == 0:
-                                break
-
-                        # If was last try, skip to next user
-                        repo_tries -= 1
-                        if repo_tries == 0:
+                # Get first commits
+                commits = self._client.search_commits(
+                    query = f'author:{self._user.login} sort:author-date-asc'
+                )
+                # If has at least one commit
+                if commits.totalCount:
+                    # For each commit
+                    for commit in commits[:self.DEFAULT_COMMITS_LIMIT]:
+                        # Get patch
+                        patch = requests.get(commit.html_url + ".patch").text
+                        emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
+                        # If found email address
+                        if len(emails):
+                            self._email = emails[0]
                             break
 
-        except github.GithubException:
+        except GithubException:
             pass
-
         return self._email
+
+    @property
+    def last_commit(self)->datetime:
+        pass
 
 class EmailCollector:
 
@@ -65,13 +55,13 @@ class EmailCollector:
     RATE_LIMIT = 4900
 
     def __init__(self, token: str, repo: str):
-        g = github.Github(token, per_page=self.MAX_RESULTS_PER_PAGE)
-        self._repo = g.get_repo(repo)
+        self._client = Github(token, per_page=self.MAX_RESULTS_PER_PAGE)
+        self._repo = self._client.get_repo(repo)
         self._requests = 0
         self._users = {}
 
     def __add_user(self, user: NamedUser)->None:
-        self._users[user.login] = GithubUser(user)
+        self._users[user.login] = GithubUser(self._client, user)
 
     def __add_elements(self, elements, mapper)->int:
         print(f"0/{elements.totalCount}", flush=True, end="\r")
