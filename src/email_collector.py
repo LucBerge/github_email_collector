@@ -9,6 +9,7 @@ REPOS = "bot4dofus/Datafus"
 class GithubUser():
 
     DEFAULT_COMMITS_LIMIT = 4
+    NOREPLY_SUBSTRING = "noreply"
 
     REGEX_PATCH_EMAIL = r'From: .*<(.+?)>'
 
@@ -36,8 +37,10 @@ class GithubUser():
                         emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
                         # If found email address
                         if len(emails):
-                            self._email = emails[0]
-                            break
+                            # If does not contain noreply
+                            if not self.NOREPLY_SUBSTRING in emails[0]:
+                                self._email = emails[0]
+                                break
 
         except GithubException:
             pass
