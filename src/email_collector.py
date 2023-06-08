@@ -1,7 +1,10 @@
-from github import NamedUser, Github, GithubException
+from github import NamedUser, Github
+from github.GithubException import RateLimitExceededException
 from datetime import datetime
 import requests
 import re
+import time
+import traceback
 
 GITHUB_TOKEN = "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"
 REPOS = "bot4dofus/Datafus"
@@ -11,44 +14,78 @@ class GithubUser():
     DEFAULT_COMMITS_LIMIT = 4
     NOREPLY_SUBSTRING = "noreply"
 
-    REGEX_PATCH_EMAIL = r'From: .*<(.+?)>'
+    REGEX_PATCH_EMAIL = r'<(.+?)>'
 
     def __init__(self, client: Github, user: NamedUser):
         self._client = client
         self._user = user
         self._email = None
+        self._last_activity = None
+
+    @property
+    def email(self)->str:
+        if self._email is None:
+            self._email = self.get_email()
+        return self._email
+
+    @property
+    def last_activity(self)->datetime:
+        if self._last_activity is None:
+            self._last_activity = self.get_last_activity()
+        return self._last_activity
 
     def get_email(self)->str:
         try:
             # If user has public email address
             if self._user.email is not None:
-                self._email = self._user.email
+                return self._user.email
             else:
                 # Get first commits
                 commits = self._client.search_commits(
                     query = f'author:{self._user.login} sort:author-date-asc'
                 )
+
+                def get_length():
+                    return commits.totalCount
+
+                length = self._perform_request(get_length)
                 # If has at least one commit
-                if commits.totalCount:
+                if length:
                     # For each commit
                     for commit in commits[:self.DEFAULT_COMMITS_LIMIT]:
                         # Get patch
-                        patch = requests.get(commit.html_url + ".patch").text
-                        emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
+                        _, data = self._client._Github__requester.requestMultipartAndCheck("GET", commit.html_url + ".patch")
+                        emails = re.findall(self.REGEX_PATCH_EMAIL, data.get("data"))
+
                         # If found email address
                         if len(emails):
                             # If does not contain noreply
                             if not self.NOREPLY_SUBSTRING in emails[0]:
-                                self._email = emails[0]
-                                break
+                                return emails[0]
 
-        except GithubException:
-            pass
-        return self._email
+        except Exception:
+            traceback.print_exc()
 
-    @property
-    def last_commit(self)->datetime:
-        pass
+        return None
+
+    def get_last_activity(self)->datetime:
+        commits = self._client.search_commits(
+            query = f'author:{self._user.login} sort:author-date-desc'
+        )
+        if commits.totalCount:
+            return commits[0].commit.author.date
+        return None
+
+    def _perform_request(self, request_method):
+        try:
+            return request_method()
+        except RateLimitExceededException:
+            now = datetime.now()
+            end = datetime.fromtimestamp(self._client.rate_limiting_resettime)
+            seconds = round((end - now).total_seconds(), 0) + 1
+            print(f"Rate limit reached ! Waiting {seconds} seconds...")
+            time.sleep(seconds)
+            return request_method()
 
 class EmailCollector:
 
@@ -105,22 +142,35 @@ class EmailCollector:
         return self.__add_elements(self._repo.get_issues(), lambda i: i.user)
 
     def get_users(self)->dict:
+        self._users = {}
+
+        # STEP 1 - GET USERS
+
         print(f"Getting users for {self._repo.full_name}...")
-
-        # If users not collected
-        if len(self._users) == 0:
-            self.__add_owner()
-            self.__add_contributors()
-            self.__add_forks()
-            self.__add_stargazers()
-            self.__add_watchers()
-            self.__add_issues()
-
+        self.__add_owner()
+        self.__add_contributors()
+        self.__add_forks()
+        self.__add_stargazers()
+        self.__add_watchers()
+        self.__add_issues()
         print(f"Found {len(self._users)} unique users")
+
+        # STEP 2 - ORDERING USERS
+
+        #print(f"Ordering users from the most active to the less active {self._repo.full_name}...")
+        #print(self._users)
+        #print("=============================")
+        #print(dict(sorted(self._users.items(), key=lambda u: u[1].last_activity)))
+
         return self._users
 
     def get_emails(self)->tuple[dict, float]:
+
+        # STEP 1 - GET USERS
+
         self.get_users()
+
+        # STEP 2 - GET EMAILS
 
         print(f"Getting email addresses for {self._repo.full_name}...")
         emails = {}
@@ -129,12 +179,13 @@ class EmailCollector:
         print(f"0/{len(self._users)}", flush=True, end='\r')
         for login, user in self._users.items():
 
-            email = user.get_email()
-            if email is not None:
-                emails[login] = email
+            if user.email is not None:
+                emails[login] = user.email
 
             print(f"{i}/{len(self._users)} | {len(emails)} success | {i-len(emails)} fails", flush=True, end='\n' if i==len(self._users) else '\r')
             i+=1
+
+        # STEP 4 - DISPLAY RESULTS
 
         print(f"Found {len(emails)} email addresses")
         success_rate = round(len(emails)*100/len(self._users), 2)
