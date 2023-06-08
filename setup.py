@@ -20,7 +20,7 @@ setuptools.setup(
     description="Collect email address of users affiliated to a given repository",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url='https://github.com/LucBerge/github-email-collector',
+    url='https://github.com/LucBerge/github_email_collector',
     packages=setuptools.find_packages(),
     install_requires=requirements
 )

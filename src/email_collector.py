@@ -6,9 +6,6 @@ import re
 import time
 import traceback
 
-GITHUB_TOKEN = "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"
-REPOS = "bot4dofus/Datafus"
-
 class GithubUser():
 
     DEFAULT_COMMITS_LIMIT = 4
