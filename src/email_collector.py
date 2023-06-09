@@ -29,27 +29,31 @@ class GithubUser():
 
                 except RateLimitExceededException:
                     self._wait_until(self._client.rate_limiting_resettime)
-                    self._email = self.get_email()
 
                 except GithubException:
                     print(f"Cannot retrieve email for user {self._user.login}")
                     traceback.print_exc()
                     break
+
         return self._email
 
     @property
     def last_activity(self)->datetime:
         if self._last_activity is None:
-            try:
-                self._last_activity = self.get_last_activity()
+            while True:
+                try:
+                    self._last_activity = self.get_last_activity()
+                    break
 
-            except RateLimitExceededException:
-                self._wait_until(self._client.rate_limiting_resettime)
-                self._last_activity = self.get_last_activity()
+                except RateLimitExceededException:
+                    self._wait_until(self._client.rate_limiting_resettime)
 
-            except GithubException:
-                print(f"Cannot retrieve last_activity for user {self._user.login}")
-                traceback.print_exc()
+                except (GithubException, IndexError):
+                    print(f"Cannot retrieve last_activity for user {self._user.login}. Using user creation date instead...")
+                    traceback.print_exc()
+                    self._last_activity = self._user.created_at
+                    break
+
         return self._last_activity
 
     def get_email(self)->str:
@@ -77,9 +81,7 @@ class GithubUser():
 
     def get_last_activity(self)->datetime:
         commits = self._client.search_commits(query = f'author:{self._user.login} sort:author-date-desc')
-        #if commits.totalCount:
         return commits[0].commit.author.date
-        #return None
 
     def _wait_until(self, timestamp):
             end = datetime.fromtimestamp(timestamp)
@@ -185,7 +187,9 @@ class EmailCollector:
             i+=1
 
         # STEP 3 - SORT USERS
-
+        print(len(emails))
+        for email in emails:
+            print(email['last_activity'])
         emails.sort(key=lambda email: email['last_activity'], reverse=True)
 
         # STEP 4 - DISPLAY RESULTS
