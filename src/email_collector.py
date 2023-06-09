@@ -1,10 +1,10 @@
-from github import NamedUser, Github
+from github import NamedUser, Github, GithubException
 from github.GithubException import RateLimitExceededException
 from datetime import datetime
-import requests
 import re
 import time
 import traceback
+import requests
 
 class GithubUser():
 
@@ -22,46 +22,58 @@ class GithubUser():
     @property
     def email(self)->str:
         if self._email is None:
-            self._email = self.get_email()
+            while True:
+                try:
+                    self._email = self.get_email()
+                    break
+
+                except RateLimitExceededException:
+                    self._wait_until(self._client.rate_limiting_resettime)
+                    self._email = self.get_email()
+
+                except GithubException:
+                    print(f"Cannot retrieve email for user {self._user.login}")
+                    traceback.print_exc()
+                    break
         return self._email
 
     @property
     def last_activity(self)->datetime:
         if self._last_activity is None:
-            self._last_activity = self.get_last_activity()
+            try:
+                self._last_activity = self.get_last_activity()
+
+            except RateLimitExceededException:
+                self._wait_until(self._client.rate_limiting_resettime)
+                self._last_activity = self.get_last_activity()
+
+            except GithubException:
+                print("fCannot retrieve last_activity for user {self._user.login}")
+                traceback.print_exc()
         return self._last_activity
 
     def get_email(self)->str:
-        try:
-            # If user has public email address
-            if self._user.email is not None:
-                return self._user.email
-            else:
-                # Get first commits
-                commits = self._client.search_commits(
-                    query = f'author:{self._user.login} sort:author-date-asc'
-                )
+        # If user has public email address
+        if self._user.email is not None:
+            return self._user.email
+        else:
+            # Get first commits
+            commits = self._client.search_commits( # TODO public commits only example with user '0xD7ba952CE8A0976e8d9852b7649bf01c30146'
+                query = f'author:{self._user.login} sort:author-date-asc'
+            )
+            # If has at least one commit
+            if commits.totalCount:
+                # For each commit
+                for commit in commits[:self.DEFAULT_COMMITS_LIMIT]:
+                    # Get patch              
+                    patch = requests.get(commit.html_url + ".patch").text
+                    emails = re.findall(self.REGEX_PATCH_EMAIL, patch)
 
-                def get_length():
-                    return commits.totalCount
-
-                length = self._perform_request(get_length)
-                # If has at least one commit
-                if length:
-                    # For each commit
-                    for commit in commits[:self.DEFAULT_COMMITS_LIMIT]:
-                        # Get patch
-                        _, data = self._client._Github__requester.requestMultipartAndCheck("GET", commit.html_url + ".patch")
-                        emails = re.findall(self.REGEX_PATCH_EMAIL, data.get("data"))
-
-                        # If found email address
-                        if len(emails):
-                            # If does not contain noreply
-                            if not self.NOREPLY_SUBSTRING in emails[0]:
-                                return emails[0]
-
-        except Exception:
-            traceback.print_exc()
+                    # If found email address
+                    if len(emails):
+                        # If does not contain noreply
+                        if not self.NOREPLY_SUBSTRING in emails[0]:
+                            return emails[0]
 
         return None
 
@@ -69,20 +81,18 @@ class GithubUser():
         commits = self._client.search_commits(
             query = f'author:{self._user.login} sort:author-date-desc'
         )
-        if commits.totalCount:
-            return commits[0].commit.author.date
-        return None
+        #if commits.totalCount:
+        return commits[0].commit.author.date
+        #return None
 
-    def _perform_request(self, request_method):
-        try:
-            return request_method()
-        except RateLimitExceededException:
-            now = datetime.now()
-            end = datetime.fromtimestamp(self._client.rate_limiting_resettime)
-            seconds = round((end - now).total_seconds(), 0) + 1
-            print(f"Rate limit reached ! Waiting {seconds} seconds...")
-            time.sleep(seconds)
-            return request_method()
+    def _wait_until(self, timestamp):
+            end = datetime.fromtimestamp(timestamp)
+            while datetime.now() < end:
+                now = datetime.now()
+                seconds = round((end - now).total_seconds(), 0) + 1
+                print(f"Rate limit reached ! Waiting {seconds} seconds...", end='\r')
+                time.sleep(seconds)
+
 
 class EmailCollector:
 
@@ -141,23 +151,16 @@ class EmailCollector:
     def get_users(self)->dict:
         self._users = {}
 
-        # STEP 1 - GET USERS
-
         print(f"Getting users for {self._repo.full_name}...")
+
         self.__add_owner()
         self.__add_contributors()
         self.__add_forks()
         self.__add_stargazers()
         self.__add_watchers()
         self.__add_issues()
+
         print(f"Found {len(self._users)} unique users")
-
-        # STEP 2 - ORDERING USERS
-
-        #print(f"Ordering users from the most active to the less active {self._repo.full_name}...")
-        #print(self._users)
-        #print("=============================")
-        #print(dict(sorted(self._users.items(), key=lambda u: u[1].last_activity)))
 
         return self._users
 
@@ -170,17 +173,24 @@ class EmailCollector:
         # STEP 2 - GET EMAILS
 
         print(f"Getting email addresses for {self._repo.full_name}...")
-        emails = {}
+        emails = []
 
         i = 1
         print(f"0/{len(self._users)}", flush=True, end='\r')
         for login, user in self._users.items():
 
             if user.email is not None:
-                emails[login] = user.email
+                emails.append({'login': login, 
+                              'email': user.email,
+                              #'last_activity': user.last_activity
+                             })
 
             print(f"{i}/{len(self._users)} | {len(emails)} success | {i-len(emails)} fails", flush=True, end='\n' if i==len(self._users) else '\r')
             i+=1
+
+        # STEP 3 - SORT USERS
+
+        # TODO
 
         # STEP 4 - DISPLAY RESULTS
 
