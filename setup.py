@@ -14,7 +14,7 @@ long_description = open("README.md", "r").read()
 
 setuptools.setup(
     name='github_email_collector',
-    version='0.1',
+    version='0.2',
     author='LucBerge',
     author_email='lucas.bergeron@outlook.fr',
     description="Collect email address of users affiliated to a given repository",
