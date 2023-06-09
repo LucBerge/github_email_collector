@@ -48,7 +48,7 @@ class GithubUser():
                 self._last_activity = self.get_last_activity()
 
             except GithubException:
-                print("fCannot retrieve last_activity for user {self._user.login}")
+                print(f"Cannot retrieve last_activity for user {self._user.login}")
                 traceback.print_exc()
         return self._last_activity
 
@@ -58,9 +58,7 @@ class GithubUser():
             return self._user.email
         else:
             # Get first commits
-            commits = self._client.search_commits( # TODO public commits only example with user '0xD7ba952CE8A0976e8d9852b7649bf01c30146'
-                query = f'author:{self._user.login} sort:author-date-asc'
-            )
+            commits = self._client.search_commits(query = f'author:{self._user.login} sort:author-date-asc')
             # If has at least one commit
             if commits.totalCount:
                 # For each commit
@@ -78,9 +76,7 @@ class GithubUser():
         return None
 
     def get_last_activity(self)->datetime:
-        commits = self._client.search_commits(
-            query = f'author:{self._user.login} sort:author-date-desc'
-        )
+        commits = self._client.search_commits(query = f'author:{self._user.login} sort:author-date-desc')
         #if commits.totalCount:
         return commits[0].commit.author.date
         #return None
@@ -90,7 +86,7 @@ class GithubUser():
             while datetime.now() < end:
                 now = datetime.now()
                 seconds = round((end - now).total_seconds(), 0) + 1
-                print(f"Rate limit reached ! Waiting {seconds} seconds...", end='\r')
+                print(f"Rate limit reached ! Waiting {seconds} seconds...")
                 time.sleep(seconds)
 
 
@@ -164,7 +160,7 @@ class EmailCollector:
 
         return self._users
 
-    def get_emails(self)->tuple[dict, float]:
+    def get_emails(self)->list[dict]:
 
         # STEP 1 - GET USERS
 
@@ -182,7 +178,7 @@ class EmailCollector:
             if user.email is not None:
                 emails.append({'login': login, 
                               'email': user.email,
-                              #'last_activity': user.last_activity
+                              'last_activity': user.last_activity
                              })
 
             print(f"{i}/{len(self._users)} | {len(emails)} success | {i-len(emails)} fails", flush=True, end='\n' if i==len(self._users) else '\r')
@@ -190,7 +186,7 @@ class EmailCollector:
 
         # STEP 3 - SORT USERS
 
-        # TODO
+        emails.sort(key=lambda email: email['last_activity'], reverse=True)
 
         # STEP 4 - DISPLAY RESULTS
 
