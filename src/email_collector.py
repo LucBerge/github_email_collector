@@ -187,9 +187,7 @@ class EmailCollector:
             i+=1
 
         # STEP 3 - SORT USERS
-        print(len(emails))
-        for email in emails:
-            print(email['last_activity'])
+
         emails.sort(key=lambda email: email['last_activity'], reverse=True)
 
         # STEP 4 - DISPLAY RESULTS
