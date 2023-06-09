@@ -32,7 +32,7 @@ class GithubUser():
 
                 except GithubException:
                     print(f"Cannot retrieve email for user {self._user.login}")
-                    traceback.print_exc()
+                    #traceback.print_exc()
                     break
 
         return self._email
@@ -49,8 +49,7 @@ class GithubUser():
                     self._wait_until(self._client.rate_limiting_resettime)
 
                 except (GithubException, IndexError):
-                    print(f"Cannot retrieve last_activity for user {self._user.login}. Using user creation date instead...")
-                    traceback.print_exc()
+                    print(f"Cannot retrieve last activity for user {self._user.login}. Using user creation date instead...")
                     self._last_activity = self._user.created_at
                     break
 
