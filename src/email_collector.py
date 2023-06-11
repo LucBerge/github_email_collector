@@ -141,6 +141,10 @@ class EmailCollector:
         print("Getting watchers...", flush=True)
         return self.__add_elements(self._repo.get_watchers(), lambda w: w)
 
+    def __add_subscribers(self)->int:
+        print("Getting subscribers...", flush=True)
+        return self.__add_elements(self._repo.get_subscribers(), lambda w: w)
+
     def __add_issues(self)->int:
         print("Getting issues...", flush=True)
         return self.__add_elements(self._repo.get_issues(), lambda i: i.user)
@@ -155,6 +159,7 @@ class EmailCollector:
         self.__add_forks()
         self.__add_stargazers()
         self.__add_watchers()
+        self.__add_subscribers()
         self.__add_issues()
 
         print(f"Found {len(self._users)} unique users")
